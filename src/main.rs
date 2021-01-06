@@ -199,9 +199,9 @@ impl Budget {
 
 fn main() {
     let args = Cli::from_args();
-    let base_dir = dirs::config_dir().unwrap().join("budgetme/");
-    let config_path = dirs::config_dir().unwrap().join("budgetme/config.json");
-    let data_path = dirs::config_dir().unwrap().join("budgetme/data.json");
+    let base_dir = dirs::config_dir().unwrap().join("budgetme");
+    let config_path = dirs::config_dir().unwrap().join("budgetme").join("config.json");
+    let data_path = dirs::config_dir().unwrap().join("budgetme").join("data.json");
     let config:Config;
     if config_path.exists() {
         config = serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
