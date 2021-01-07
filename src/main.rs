@@ -1,9 +1,11 @@
 use std::{
     fs,
+    path::{Path, PathBuf}
 };
 use chrono::prelude::*;
 use colored::*;
 use serde::{Deserialize, Serialize};
+use derivative::Derivative;
 
 // (Buf) Uncomment these lines to have the output buffered, this can provide
 // better performance but is not always intuitive behaviour.
@@ -39,10 +41,12 @@ enum Command {
 
 #[derive(StructOpt, Debug)]
 enum CfgCommand {
+    /// Valid keys are rate and path
     Set {
         key:String,
         value:String
     },
+    /// Valid keys are rate and path
     Get {
         key:String
     }
@@ -51,19 +55,21 @@ enum CfgCommand {
 #[derive(Serialize, Deserialize)]
 struct Config {
     rate:f32,
+    data_path:Option<String>
 }
 
 impl Config {
     fn new() -> Config {
-        return Config {rate:2.5};
+        return Config {rate:2.5, data_path:None};
     }
 }
-
-#[derive(Serialize, Deserialize)]
+#[derive(Derivative, Serialize, Deserialize, Clone)]
+#[derivative(PartialEq)]
 struct Data {
     history:Vec<HistoryItem>,
     redo_stack:Vec<HistoryItem>,
     balance:f32,
+    #[derivative(PartialEq="ignore")]
     last_updated:u64
 }
 
@@ -93,7 +99,7 @@ impl Data {
 //     items
 // }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
 struct HistoryItem {
     amount:f32,
     reason:String,
@@ -176,6 +182,14 @@ impl Budget {
                 self.config.rate = value.parse::<f32>().unwrap();
                 self.print_rate();
             },
+            "path" =>{
+                if value.to_lowercase() == "none" {
+                    self.config.data_path = None;
+                } else {
+                    self.config.data_path = Some(value.to_string());
+                }
+                println!("Data path: {}", self.config.data_path.as_ref().unwrap_or(&"None".to_string()))
+            },
             _ => panic!(format!("Unrecognized cfg key: {}", key))
         }
     }
@@ -183,17 +197,69 @@ impl Budget {
     fn get_cfg(&self, key:&String) {
         match key.to_lowercase().as_str() {
             "rate" => self.print_rate(),
+            "path" => {
+                println!("Data path: {}", self.config.data_path.as_ref().unwrap_or(&"None".to_string()))
+            },
             _ => panic!(format!("Unrecognized cfg key: {}", key))
         }
     }
 
     fn print_rate(&self) {
-        println!("rate is {}", format!("${:.2}", self.config.rate).green().on_black());
+        println!("Rate is {}", format!("${:.2}", self.config.rate).green().on_black());
     }
 
     fn print_balance(&self) {
         let balance_formatted = if self.data.balance<0. {format!("${:.2}", &self.data.balance).bright_red().on_black()} else {format!("${:.2}", &self.data.balance).green().on_black()};
         println!("Balance: {}", balance_formatted);
+    }
+
+    fn verify_against(&self, old_data:Data) -> bool{
+        let mut old_data_updated = old_data.clone();
+        old_data_updated.update(&self.config.rate);
+        if self.data == old_data_updated {
+            return true;
+        }
+        if (old_data_updated.history.len() as i32 - self.data.history.len() as i32).abs() > 2 || (old_data_updated.redo_stack.len() as i32 - self.data.redo_stack.len() as i32).abs() > 2 {
+            // histories are too different
+            println!("{}", "Histories diverge by more than one entry".red().on_black());
+            return false;
+        }
+        if old_data_updated.history.len() > 0 && old_data_updated.history.len() > self.data.history.len() {
+            if  &old_data_updated.history[..old_data_updated.history.len()-1] == &self.data.history[..] {
+                // everything matches except we have one more entry in the old data, EG we must have undone something
+                let last_item = old_data_updated.history.last().unwrap();
+                old_data_updated.balance += last_item.amount;
+                if self.data.balance == old_data_updated.balance {
+                    return true;
+                } else {
+                    println!("{}", format!("Data missing entry but old data history does not match (expected {} but found {})", self.data.balance, old_data_updated.balance).red().on_black());
+                    return false;
+                }
+                // // revert
+                // old_data_updated.balance -= last_item.amount;
+            } else {
+                println!("{}", "Histories are incompatible".red().on_black());
+                return false;
+            }
+        } else if self.data.history.len() > 0 && self.data.history.len() > old_data_updated.history.len() {
+            if  &self.data.history[..self.data.history.len()-1] == &old_data_updated.history[..] {
+                // everything matches except we have one more entry in the new data, EG we must have added something
+                let last_item = self.data.history.last().unwrap();
+                old_data_updated.balance -= last_item.amount;
+                if self.data.balance == old_data_updated.balance {
+                    return true;
+                } else {
+                    println!("{}", format!("Data has new entry but diverges from old data (expected {} but found {})", self.data.balance, old_data_updated.balance).red().on_black());
+                    return false;
+                }
+                // // revert
+                // old_data_updated.balance += last_item.amount;
+            } else {
+                println!("{}", "Histories are incompatible".red().on_black());
+                return false;
+            }
+        }
+        return false;
     }
 }
 
@@ -201,16 +267,23 @@ fn main() {
     let args = Cli::from_args();
     let base_dir = dirs::config_dir().unwrap().join("budgetme");
     let config_path = dirs::config_dir().unwrap().join("budgetme").join("config.json");
-    let data_path = dirs::config_dir().unwrap().join("budgetme").join("data.json");
     let config:Config;
     if config_path.exists() {
         config = serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
     } else {
         config = Config::new();
     }
+    let data_path;
+    if config.data_path.is_some() {
+        data_path = PathBuf::from((&config).data_path.as_ref().unwrap());
+    } else {
+        let path = String::from(dirs::config_dir().unwrap().to_str().unwrap());
+        data_path = Path::new(&path).join("budgetme");
+    }
+    let mut full_data_path = data_path.join("data.json");
     let data:Data;
-    if data_path.exists() {
-        data = serde_json::from_str(&fs::read_to_string(&data_path).unwrap()).unwrap();
+    if full_data_path.exists() {
+        data = serde_json::from_str(&fs::read_to_string(&full_data_path).unwrap()).unwrap();
     } else {
         data = Data::new();
     }
@@ -231,6 +304,20 @@ fn main() {
         }
     }
     fs::create_dir_all(base_dir).unwrap();
+    if budget.config.data_path.is_some() {
+        fs::create_dir_all((&budget).config.data_path.as_ref().unwrap()).unwrap();
+        full_data_path = PathBuf::from((&budget.config).data_path.as_ref().unwrap()).join("data.json");
+    }
     fs::write(&config_path, serde_json::to_string(&budget.config).unwrap()).unwrap();
-    fs::write(&data_path, serde_json::to_string(&budget.data).unwrap()).unwrap();
+    let old_data:Data;
+    if full_data_path.exists() {
+        old_data = serde_json::from_str(&fs::read_to_string(&full_data_path).unwrap()).unwrap();
+    } else {
+        old_data = Data::new();
+    }
+    if budget.verify_against(old_data) {
+        fs::write(&full_data_path, serde_json::to_string(&budget.data).unwrap()).unwrap();
+    } else {
+        println!("{}", "Refusing to overwrite unrelated histories".red().on_black());
+    }
 }
