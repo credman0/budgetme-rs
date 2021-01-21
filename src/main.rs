@@ -263,7 +263,17 @@ impl Budget {
     }
 }
 
+#[cfg(not(target_os="windows"))]
+fn prepare_virtual_terminal() {
+}
+
+#[cfg(target_os="windows")]
+fn prepare_virtual_terminal() {
+    control::set_virtual_terminal(true).unwrap();
+}
+
 fn main() {
+    prepare_virtual_terminal();
     let args = Cli::from_args();
     let base_dir = dirs::config_dir().unwrap().join("budgetme");
     let config_path = dirs::config_dir().unwrap().join("budgetme").join("config.json");

@@ -1,5 +1,5 @@
 [package]
-name = "budgetme"
+name = "budget"
 version = "0.1.0"
 authors = ["Colin Redman <20376935+credman0@users.noreply.github.com>"]
 edition = "2018"
