@@ -1,2 +1,2 @@
 # budgetme
-A program for budgeting fivilities by tracking expenses and adding a daily allowance
+A program for budgeting frivilities by tracking expenses and adding a daily allowance
