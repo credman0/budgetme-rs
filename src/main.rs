@@ -10,6 +10,8 @@ use rusoto_core::{Region,credential::StaticProvider};
 use rusoto_s3::{S3, S3Client, CreateBucketRequest, PutObjectRequest, GetObjectRequest};
 use async_trait::async_trait;
 use tokio::{runtime, io::AsyncReadExt};
+use rand::{thread_rng, Rng};
+use rand::distributions::Alphanumeric;
 
 // (Buf) Uncomment these lines to have the output buffered, this can provide
 // better performance but is not always intuitive behaviour.
@@ -37,10 +39,8 @@ enum Command {
         #[structopt(short="o", long)]
         loan:bool
     },
-    Cfg {
-        #[structopt(subcommand)]
-        command:CfgCommand
-    }
+    #[structopt(flatten)]
+    CfgCommand(CfgCommand)
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
@@ -51,26 +51,36 @@ enum DataSource {
 
 #[derive(StructOpt, Debug)]
 enum CfgCommand {
-    /// Valid keys are rate and path
     Set {
-        key:String,
+        #[structopt(subcommand)]
+        key:CfgKey,
         value:String
     },
-    /// Valid keys are [rate, path, access_key, secret_access_key, 
     Get {
-        key:String
-    }
+        #[structopt(subcommand)]
+        key:CfgKey
+    }   
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(StructOpt, Debug)]
+enum CfgKey {
+    Rate,
+    Path,
+    AccessKey,
+    SecretKey,
+    BucketName,
+    Region,
+    Provider
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
 struct Config {
-    rate:f32,
     data_source:Option<DataSource>
 }
 
 impl Config {
     fn new() -> Config {
-        return Config {rate:2.5, data_source:None};
+        return Config {data_source:None};
     }
 }
 #[derive(Derivative, Serialize, Deserialize, Clone)]
@@ -80,7 +90,8 @@ struct Data {
     redo_stack:Vec<HistoryItem>,
     balance:f32,
     #[derivative(PartialEq="ignore")]
-    last_updated:u64
+    last_updated:u64,
+    rate:Option<f32>,
 }
 
 impl Data {
@@ -89,6 +100,7 @@ impl Data {
             history:vec![],
             redo_stack:vec![],
             balance:10.,
+            rate:Some(5.),
             last_updated:Local::now().timestamp_millis() as u64
         }
     }
@@ -186,36 +198,77 @@ impl Budget {
         }
     }
     
-    fn set_cfg(&mut self, key:&String, value:&String) {
-        match key.to_lowercase().as_str() {
-            "rate" => {
-                self.config.rate = value.parse::<f32>().unwrap();
-                self.print_rate();
-            },
-            "path" =>{
-                if value.to_lowercase() == "none" {
-                    self.config.data_path = None;
-                } else {
-                    self.config.data_path = Some(value.to_string());
+    fn set_cfg(&mut self, key:&CfgKey, value:&String) {
+        if let CfgKey::Provider = key {
+            match value.trim().to_lowercase().as_str() {
+                "aws" => {
+                    self.config.data_source = Some(DataSource::Aws(AwsS3DataProviderFactory::new()));
+                },
+                "local" => {
+                    self.config.data_source = Some(DataSource::Local(LocalDataProvider::new()));
+                },
+                _=>{
+                    panic!("Invalid provider \"{}\", valid are aws or local", value)
                 }
-                println!("Data path: {}", self.config.data_path.as_ref().unwrap_or(&"None".to_string()))
-            },
-            _ => panic!(format!("Unrecognized cfg key: {}", key))
+            }
+        } else if let CfgKey::Rate = key {
+            self.data.rate = Some(value.parse::<f32>().unwrap());
+            self.print_rate();
+        } else {
+            if let Some(DataSource::Aws(provider)) = &mut self.config.data_source {
+                match key {
+                    CfgKey::BucketName => {
+                        provider.bucket_name = value.to_string();
+                        println!("Bucket name: {}", provider.bucket_name)
+                    },
+                    CfgKey::AccessKey =>{
+                        provider.access_key = value.to_string();
+                        println!("Access key: {}", provider.access_key)
+                    },
+                    CfgKey::SecretKey =>{
+                        provider.secret_access_key = value.to_string();
+                        println!("Secret key: {}", provider.secret_access_key)
+                    },
+                    _=> {
+                        println!("Invalid key for aws data provider: {:?}",key)
+                    }
+                }
+            } else if let Some(DataSource::Local(provider)) = &mut self.config.data_source {
+                match key {
+                    CfgKey::Path =>{
+                        if value.to_lowercase() == "none" {
+                            provider.file_path = LocalDataProvider::new().file_path;
+                        } else {
+                            provider.file_path = PathBuf::from(value);
+                        }
+                        println!("Data path: {}", provider.file_path.as_os_str().to_string_lossy())
+                    },
+                    _=> {
+                        println!("Invalid key for local data provider: {:?}",key)
+                    }
+                }
+            }
         }
     }
 
-    fn get_cfg(&self, key:&String) {
-        match key.to_lowercase().as_str() {
-            "rate" => self.print_rate(),
-            "path" => {
-                println!("Data path: {}", self.config.data_path.as_ref().unwrap_or(&"None".to_string()))
-            },
-            _ => panic!(format!("Unrecognized cfg key: {}", key))
+    fn get_cfg(&self, key:&CfgKey) {
+        if let Some(DataSource::Aws(provider)) = &self.config.data_source {
+            panic!("Cannot set path on aws provider")
+        } else if let Some(DataSource::Local(provider)) = &self.config.data_source {
+            match key {
+                CfgKey::Rate => self.print_rate(),
+                CfgKey::Path => {
+                    println!("Data path: {}", provider.file_path.as_os_str().to_string_lossy())
+                },
+                _=> {
+                    println!("Invalid key for local data provider: {:?}",key)
+                }
+            }
         }
     }
 
     fn print_rate(&self) {
-        println!("Rate is {}", format!("${:.2}", self.config.rate).green().on_black());
+        println!("Rate is {}", format!("${:.2}", self.data.rate.unwrap()).green().on_black());
     }
 
     fn print_balance(&self) {
@@ -225,7 +278,8 @@ impl Budget {
 
     fn verify_against(&self, old_data:Data) -> bool{
         let mut old_data_updated = old_data.clone();
-        old_data_updated.update(&self.config.rate);
+        old_data_updated.rate = self.data.rate;
+        old_data_updated.update(&old_data_updated.rate.unwrap());
         if self.data == old_data_updated {
             return true;
         }
@@ -292,8 +346,8 @@ struct LocalDataProvider {
 #[async_trait]
 impl DataProvider for LocalDataProvider {
     async fn get(&self) -> Option<Data> {
-        if self.file_path.exists() {
-            let data:Data = serde_json::from_str(&fs::read_to_string(&self.file_path).unwrap()).unwrap();
+        if self.full_path().exists() {
+            let data:Data = serde_json::from_str(&fs::read_to_string(&self.full_path()).unwrap()).unwrap();
             return Some(data);
         } else {
             return None;
@@ -301,7 +355,8 @@ impl DataProvider for LocalDataProvider {
     }
 
     async fn put(&self, data:&Data) {
-        fs::write(&self.file_path, serde_json::to_string(&data).unwrap()).unwrap();
+        fs::create_dir_all(&self.file_path).unwrap_or_default();
+        fs::write(self.full_path(), serde_json::to_string(&data).unwrap()).unwrap();
     }
 }
 
@@ -312,8 +367,17 @@ impl DataProviderFactory for LocalDataProvider {
 }
 
 impl LocalDataProvider {
-    fn new(file_path:PathBuf) -> LocalDataProvider {
+    fn from(file_path:PathBuf) -> LocalDataProvider {
         return LocalDataProvider{file_path:file_path}
+    }
+    fn new() -> LocalDataProvider {
+        let path = String::from(dirs::config_dir().unwrap().to_str().unwrap());
+        let data_path = Path::new(&path).join("budgetme");
+        //let full_data_path = data_path.join("data.json");
+        return LocalDataProvider{file_path:data_path}
+    }
+    fn full_path(&self) -> PathBuf{
+        return self.file_path.join("data.json");
     }
 }
 
@@ -391,6 +455,21 @@ impl DataProviderFactory for AwsS3DataProviderFactory {
     }
 }
 
+impl AwsS3DataProviderFactory {
+    fn new() -> AwsS3DataProviderFactory {
+        return AwsS3DataProviderFactory{access_key:"".to_string(), secret_access_key:"".to_string(), bucket_name:AwsS3DataProviderFactory::generate_bucket_name(), region:Region::UsEast1}
+    }
+
+    fn generate_bucket_name() -> String {
+        let rand_string:String = thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(8)
+        .map(char::from)
+        .collect();
+        return format!("bucket-{}", rand_string.to_lowercase())
+    }
+}
+
 #[cfg(not(target_os="windows"))]
 fn prepare_virtual_terminal() {
 }
@@ -405,28 +484,44 @@ fn main() {
     let args = Cli::from_args();
     let base_dir = dirs::config_dir().unwrap().join("budgetme");
     let config_path = dirs::config_dir().unwrap().join("budgetme").join("config.json");
-    let config:Config;
+    let mut config:Config;
     if config_path.exists() {
         config = serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
     } else {
         config = Config::new();
     }
-    let data_path;
-    if config.data_path.is_some() {
-        data_path = PathBuf::from((&config).data_path.as_ref().unwrap());
-    } else {
-        let path = String::from(dirs::config_dir().unwrap().to_str().unwrap());
-        data_path = Path::new(&path).join("budgetme");
-    }
-    let mut full_data_path = data_path.join("data.json");
+    // let data_path;
+    // if config.data_path.is_some() {
+    //     data_path = PathBuf::from((&config).data_path.as_ref().unwrap());
+    // } else {
+    //     let path = String::from(dirs::config_dir().unwrap().to_str().unwrap());
+    //     data_path = Path::new(&path).join("budgetme");
+    // }
+    // let mut full_data_path = data_path.join("data.json");
     //let mut data_provider:LocalDataProvider = LocalDataProvider::new(full_data_path.clone());
-    let data_provider:&DataProvider = &*AwsS3DataProviderFactory {access_key:"AKIA5S65SRCS2XZIQ5FF".to_string(), secret_access_key:"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".to_string(), bucket_name:"budgetdfasdfasdfasdfasdfasdf".to_string(), region:Region::UsEast1}.to_provider();
+    let data_provider:Box<dyn DataProvider>;
+    if config.data_source.is_none() {
+        config.data_source = Some(DataSource::Local(LocalDataProvider::new()));
+    }
+    let data_source = config.data_source.clone();
+    match data_source.unwrap() {
+        DataSource::Local(provider) => {
+            data_provider = provider.to_provider();
+        },
+        DataSource::Aws(provider) => {
+            data_provider = provider.to_provider();
+        }
+    }
+    //let data_provider:&DataProvider = &*AwsS3DataProviderFactory {access_key:"AKIA5S65SRCS2XZIQ5FF".to_string(), secret_access_key:"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".to_string(), bucket_name:"budgetdfasdfasdfasdfasdfasdf".to_string(), region:Region::UsEast1}.to_provider();
     let maybe_data = data_provider.get();
-    let data:Data = runtime::Runtime::new().unwrap().block_on(async {
+    let mut data:Data = runtime::Runtime::new().unwrap().block_on(async {
         maybe_data.await.unwrap_or(Data::new())
     });
-    let mut budget = Budget {config:config, data:data};
-    budget.data.update(&budget.config.rate);
+    if data.rate.is_none() {
+        data.rate = Some(5.);
+    }
+    let mut budget = Budget {config:config.clone(), data:data};
+    budget.data.update(&budget.data.rate.unwrap().clone());
     if args.command.is_none() {
         budget.print_balance();
     } else {
@@ -435,18 +530,35 @@ fn main() {
             Command::Undo => budget.undo(),
             Command::Redo => budget.redo(),
             Command::Spend{amount, reason, loan} => budget.spend(amount,reason,&loan),
-            Command::Cfg{command} => match command {
+            Command::CfgCommand(command) => match command {
                 CfgCommand::Set{key, value} => budget.set_cfg(&key, &value),
                 CfgCommand::Get{key} => budget.get_cfg(&key)
             },
         }
     }
     fs::create_dir_all(base_dir).unwrap();
-    if budget.config.data_path.is_some() {
-        fs::create_dir_all((&budget).config.data_path.as_ref().unwrap()).unwrap();
-        // update the full path because it might have changed during configuration
-        full_data_path = PathBuf::from((&budget.config).data_path.as_ref().unwrap()).join("data.json");
+
+    // recompute provider in case of changes in settings
+    let data_provider:Box<dyn DataProvider>;
+    let data_source = config.data_source.clone();
+    if data_source.is_some() {
+        match data_source.unwrap() {
+            DataSource::Local(provider) => {
+                data_provider = provider.to_provider();
+            },
+            DataSource::Aws(provider) => {
+                data_provider = provider.to_provider();
+            }
+        }
+    } else {
+        // should be impossible at this point
+        data_provider = Box::new(LocalDataProvider::new());
     }
+    // if budget.config.data_path.is_some() {
+    //     fs::create_dir_all((&budget).config.data_path.as_ref().unwrap()).unwrap();
+    //     // update the full path because it might have changed during configuration
+    //     full_data_path = PathBuf::from((&budget.config).data_path.as_ref().unwrap()).join("data.json");
+    // }
     //data_provider.file_path = full_data_path;
     fs::write(&config_path, serde_json::to_string(&budget.config).unwrap()).unwrap();
     let maybe_old_data = data_provider.get();
