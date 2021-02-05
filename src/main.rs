@@ -18,6 +18,7 @@ use rand::distributions::Alphanumeric;
 // use std::io::BufWriter;
 
 use structopt::StructOpt;
+use structopt::clap::arg_enum;
 
 // Our CLI arguments. (help and version are automatically generated)
 // Documentation on how to use:
@@ -52,25 +53,27 @@ enum DataSource {
 #[derive(StructOpt, Debug)]
 enum CfgCommand {
     Set {
-        #[structopt(subcommand)]
+        #[structopt(possible_values = &CfgKey::variants(), case_insensitive = true)]
         key:CfgKey,
         value:String
     },
     Get {
-        #[structopt(subcommand)]
+        #[structopt(possible_values = &CfgKey::variants(), case_insensitive = true)]
         key:CfgKey
     }   
 }
 
-#[derive(StructOpt, Debug)]
-enum CfgKey {
-    Rate,
-    Path,
-    AccessKey,
-    SecretKey,
-    BucketName,
-    Region,
-    Provider
+arg_enum! {
+    #[derive(Debug)]
+    enum CfgKey {
+        Rate,
+        Path,
+        AccessKey,
+        SecretKey,
+        BucketName,
+        Region,
+        Provider
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
@@ -128,6 +131,12 @@ struct HistoryItem {
     time:u64
 }
 
+fn format_dollars(amount:&f32) -> String {
+    let sign_string = if amount < &0. {"-"} else {""};
+    let result = format!("{}${:.2}", sign_string, amount);
+    return result;
+}
+
 impl HistoryItem {
     fn print(&self) {
         let current_year = Local::now().year();
@@ -139,7 +148,7 @@ impl HistoryItem {
         } else {
             format_str = "%b %d %Y %I:%M%P"
         }
-        println!("{}: {} {}", date.format(format_str).to_string().blue().on_black(), format!("${:.2}", self.amount).bright_red().on_black(), self.reason.yellow().on_black());
+        println!("{}: {} {}", date.format(format_str).to_string().blue().on_black(), format_dollars(&self.amount).bright_red().on_black(), self.reason.yellow().on_black());
     }
 }
 
@@ -187,13 +196,13 @@ impl Budget {
         let new_balance = self.data.balance-amount;
         if new_balance < 0. && !loan {
             println!("{}", "Request is over budget!".bright_red().on_black());
-            println!("Balance: {}", format!("${:.2}", &self.data.balance).bright_red().on_black());
+            println!("Balance: {}", format_dollars(&self.data.balance).bright_red().on_black());
         } else {
             let history_item = HistoryItem{amount:amount, reason:reason, time:Local::now().timestamp_millis() as u64};
             history_item.print();
             self.data.history.push(history_item);
             self.data.balance = new_balance;
-            let balance_formatted = if new_balance<0. {format!("${:.2}", new_balance).bright_red().on_black()} else {format!("${:.2}", new_balance).green().on_black()};
+            let balance_formatted = if new_balance<0. {format_dollars(&new_balance).bright_red().on_black()} else {format_dollars(&new_balance).green().on_black()};
             println!("Balance: {}", balance_formatted);
         }
     }
@@ -252,6 +261,56 @@ impl Budget {
     }
 
     fn get_cfg(&self, key:&CfgKey) {
+        // if let CfgKey::Provider = key {
+        //     match value.trim().to_lowercase().as_str() {
+        //         "aws" => {
+        //             self.config.data_source = Some(DataSource::Aws(AwsS3DataProviderFactory::new()));
+        //         },
+        //         "local" => {
+        //             self.config.data_source = Some(DataSource::Local(LocalDataProvider::new()));
+        //         },
+        //         _=>{
+        //             panic!("Invalid provider \"{}\", valid are aws or local", value)
+        //         }
+        //     }
+        // } else if let CfgKey::Rate = key {
+        //     self.data.rate = Some(value.parse::<f32>().unwrap());
+        //     self.print_rate();
+        // } else {
+        //     if let Some(DataSource::Aws(provider)) = &mut self.config.data_source {
+        //         match key {
+        //             CfgKey::BucketName => {
+        //                 provider.bucket_name = value.to_string();
+        //                 println!("Bucket name: {}", provider.bucket_name)
+        //             },
+        //             CfgKey::AccessKey =>{
+        //                 provider.access_key = value.to_string();
+        //                 println!("Access key: {}", provider.access_key)
+        //             },
+        //             CfgKey::SecretKey =>{
+        //                 provider.secret_access_key = value.to_string();
+        //                 println!("Secret key: {}", provider.secret_access_key)
+        //             },
+        //             _=> {
+        //                 println!("Invalid key for aws data provider: {:?}",key)
+        //             }
+        //         }
+        //     } else if let Some(DataSource::Local(provider)) = &mut self.config.data_source {
+        //         match key {
+        //             CfgKey::Path =>{
+        //                 if value.to_lowercase() == "none" {
+        //                     provider.file_path = LocalDataProvider::new().file_path;
+        //                 } else {
+        //                     provider.file_path = PathBuf::from(value);
+        //                 }
+        //                 println!("Data path: {}", provider.file_path.as_os_str().to_string_lossy())
+        //             },
+        //             _=> {
+        //                 println!("Invalid key for local data provider: {:?}",key)
+        //             }
+        //         }
+        //     }
+        // }
         if let Some(DataSource::Aws(provider)) = &self.config.data_source {
             panic!("Cannot set path on aws provider")
         } else if let Some(DataSource::Local(provider)) = &self.config.data_source {
@@ -268,11 +327,11 @@ impl Budget {
     }
 
     fn print_rate(&self) {
-        println!("Rate is {}", format!("${:.2}", self.data.rate.unwrap()).green().on_black());
+        println!("Rate is {}", format_dollars(&self.data.rate.unwrap()).green().on_black());
     }
 
     fn print_balance(&self) {
-        let balance_formatted = if self.data.balance<0. {format!("${:.2}", &self.data.balance).bright_red().on_black()} else {format!("${:.2}", &self.data.balance).green().on_black()};
+        let balance_formatted = if self.data.balance<0. {format_dollars(&self.data.balance).bright_red().on_black()} else {format_dollars(&self.data.balance).green().on_black()};
         println!("Balance: {}", balance_formatted);
     }
 
