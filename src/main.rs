@@ -42,11 +42,6 @@ enum Command {
     CfgCommand(CfgCommand)
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
-pub enum DataSource {
-    Local(LocalDataProvider),
-    Aws(AwsS3DataProviderFactory)
-}
 
 #[derive(StructOpt, Debug)]
 enum CfgCommand {
@@ -100,22 +95,10 @@ fn main() {
     // } else {
     //     let path = String::from(dirs::config_dir().unwrap().to_str().unwrap());
     //     data_path = Path::new(&path).join("budgetme");
-    // }
+    // }    
     // let mut full_data_path = data_path.join("data.json");
     //let mut data_provider:LocalDataProvider = LocalDataProvider::new(full_data_path.clone());
-    let data_provider:Box<dyn DataProvider>;
-    if config.data_source.is_none() {
-        config.data_source = Some(DataSource::Local(LocalDataProvider::new()));
-    }
-    let data_source = config.data_source.clone();
-    match data_source.unwrap() {
-        DataSource::Local(provider) => {
-            data_provider = provider.to_provider();
-        },
-        DataSource::Aws(provider) => {
-            data_provider = provider.to_provider();
-        }
-    }
+    let data_provider:Box<dyn DataProvider> = config.get_provider_factory().to_provider();
     //let data_provider:&DataProvider = &*AwsS3DataProviderFactory {access_key:"AKIA5S65SRCS2XZIQ5FF".to_string(), secret_access_key:"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".to_string(), bucket_name:"budgetdfasdfasdfasdfasdfasdf".to_string(), region:Region::UsEast1}.to_provider();
     let maybe_data = data_provider.get();
     let mut data:Data = runtime::Runtime::new().unwrap().block_on(async {
@@ -143,21 +126,7 @@ fn main() {
     fs::create_dir_all(base_dir).unwrap();
 
     // recompute provider in case of changes in settings
-    let data_provider:Box<dyn DataProvider>;
-    let data_source = config.data_source.clone();
-    if data_source.is_some() {
-        match data_source.unwrap() {
-            DataSource::Local(provider) => {
-                data_provider = provider.to_provider();
-            },
-            DataSource::Aws(provider) => {
-                data_provider = provider.to_provider();
-            }
-        }
-    } else {
-        // should be impossible at this point
-        data_provider = Box::new(LocalDataProvider::new());
-    }
+    let data_provider:Box<dyn DataProvider> = config.get_provider_factory().to_provider();
     // if budget.config.data_path.is_some() {
     //     fs::create_dir_all((&budget).config.data_path.as_ref().unwrap()).unwrap();
     //     // update the full path because it might have changed during configuration

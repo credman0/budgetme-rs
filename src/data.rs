@@ -7,17 +7,76 @@ use colored::*;
 use serde::{Deserialize, Serialize};
 use derivative::Derivative;
 
-use crate::{DataSource, CfgKey};
-use crate::datasources::{AwsS3DataProviderFactory, LocalDataProvider};
+use std::rc::Rc;
+
+use crate::{CfgKey};
+use crate::datasources::{AwsS3DataProviderFactory, LocalDataProvider, DataProviderFactory};
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 pub struct Config {
-    pub data_source:Option<DataSource>
+    data_source:Option<DataSource>,
+    pub local_data_source:Option<LocalDataProvider>,
+    pub aws_data_source:Option<AwsS3DataProviderFactory>,
+    pub use_local:Option<bool>
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
+enum DataSource {
+    Local(LocalDataProvider),
+    Aws(AwsS3DataProviderFactory)
 }
 
 impl Config {
     pub fn new() -> Config {
-        return Config {data_source:None::<DataSource>};
+        return Config {data_source:None, local_data_source:None, aws_data_source:None, use_local:None};
+    }
+
+    pub fn get_provider_factory(&mut self) -> Rc<dyn DataProviderFactory> {
+        self.convert_from_datasource();
+        if self.use_local() {
+            return self.get_local()
+        } else {
+            return self.get_aws();
+        }
+    }
+
+    /// Old system used the datasource enum, but we want to stop that
+    fn convert_from_datasource (&mut self) {
+        if self.data_source.is_some() {
+            match self.data_source.as_ref().unwrap() {
+                DataSource::Local(local) => {
+                    self.local_data_source = Some(local.clone());
+                },
+                DataSource::Aws(aws) => {
+                    self.aws_data_source = Some(aws.clone());
+                }
+            }
+            self.data_source = None;
+        }
+    }
+
+    fn use_local(&mut self) -> bool {
+        if self.use_local.is_some() {
+            return self.use_local.unwrap();
+        } else {
+            return true;
+        }
+    }
+
+    pub fn get_local(&mut self) -> Rc<LocalDataProvider> {
+        self.convert_from_datasource();
+        if self.local_data_source.is_none() {
+            self.local_data_source = Some(LocalDataProvider::new());
+        }
+        return self.local_data_source.unwrap();
+    }
+
+    pub fn get_aws(&mut self) -> Rc<AwsS3DataProviderFactory> {
+        self.convert_from_datasource();
+        if self.aws_data_source.is_none() {
+            self.aws_data_source = Some(AwsS3DataProviderFactory::new());
+        }
+        return self.aws_data_source.as_ref().unwrap().clone();
     }
 }
 #[derive(Derivative, Serialize, Deserialize, Clone)]
@@ -142,6 +201,40 @@ impl Budget {
     }
     
     pub fn set_cfg(&mut self, key:&CfgKey, value:&String) {
+        match key {
+            CfgKey::Rate => {
+                self.data.rate = Some(value.parse::<f32>().unwrap());
+                self.print_rate();
+            },
+            CfgKey::Path => {
+                self.get
+            },
+            CfgKey::AccessKey => {
+
+            },
+            CfgKey::SecretKey => {
+
+            },
+            CfgKey::BucketName => {
+
+            },
+            CfgKey::Region => {
+
+            },
+            CfgKey::Provider => {
+                match value.trim().to_lowercase().as_str() {
+                    "aws" => {
+                        self.config.use_local = Some(false);
+                    },
+                    "local" => {
+                        self.config.use_local = Some(true);
+                    },
+                    _=>{
+                        panic!("Invalid provider \"{}\", valid are aws or local", value)
+                    }
+                }
+            },
+        }
         if let CfgKey::Provider = key {
             match value.trim().to_lowercase().as_str() {
                 "aws" => {
@@ -155,8 +248,6 @@ impl Budget {
                 }
             }
         } else if let CfgKey::Rate = key {
-            self.data.rate = Some(value.parse::<f32>().unwrap());
-            self.print_rate();
         } else {
             if let Some(DataSource::Aws(provider)) = &mut self.config.data_source {
                 match key {

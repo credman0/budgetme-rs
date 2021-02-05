@@ -18,7 +18,7 @@ pub trait DataProvider {
 
 // serializable configuration that can produce a data provider
 pub trait DataProviderFactory {
-    fn to_provider(self) -> Box<dyn DataProvider>;
+    fn to_provider(&self) -> Box<dyn DataProvider>;
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
@@ -44,8 +44,8 @@ impl DataProvider for LocalDataProvider {
 }
 
 impl DataProviderFactory for LocalDataProvider {
-    fn to_provider(self) -> Box<dyn DataProvider> {
-        return Box::new(self);
+    fn to_provider(&self) -> Box<dyn DataProvider> {
+        return Box::new(self.clone());
     }
 }
 
@@ -127,11 +127,11 @@ pub struct AwsS3DataProviderFactory {
 }
 
 impl DataProviderFactory for AwsS3DataProviderFactory {
-    fn to_provider(self) -> Box<dyn DataProvider> {
+    fn to_provider(&self) -> Box<dyn DataProvider> {
         return Box::new(AwsS3DataProvider{bucket_name:self.bucket_name.clone(), 
             s3:S3Client::new_with(
                 rusoto_core::request::HttpClient::new().expect("Failed to create HTTP client"),
-                StaticProvider::new(self.access_key, self.secret_access_key, None, None),
+                StaticProvider::new(self.access_key.clone(), self.secret_access_key.clone(), None, None),
                 self.region.clone(),
             )}
         );
