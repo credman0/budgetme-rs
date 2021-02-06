@@ -2,15 +2,12 @@ mod data;
 mod datasources;
 
 use std::{
-    fs,
-    rc::Rc
+    fs
 };
 use colored::*;
-use serde::{Deserialize, Serialize};
 use tokio::{runtime};
 
 use data::{Budget,Config,Data};
-use datasources::{DataProvider,LocalDataProvider,AwsS3DataProviderFactory, DataProviderFactory};
 
 // (Buf) Uncomment these lines to have the output buffered, this can provide
 // better performance but is not always intuitive behaviour.

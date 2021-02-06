@@ -51,9 +51,9 @@ impl DataProviderFactory for LocalDataProvider {
 }
 
 impl LocalDataProvider {
-    pub fn from(file_path:PathBuf) -> LocalDataProvider {
-        return LocalDataProvider{file_path:file_path}
-    }
+    // pub fn from(file_path:PathBuf) -> LocalDataProvider {
+    //     return LocalDataProvider{file_path:file_path}
+    // }
     pub fn new() -> LocalDataProvider {
         let path = String::from(dirs::config_dir().unwrap().to_str().unwrap());
         let data_path = Path::new(&path).join("budgetme");
