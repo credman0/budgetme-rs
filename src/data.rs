@@ -131,7 +131,7 @@ pub struct HistoryItem {
 
 fn format_dollars(amount:&f32) -> String {
     let sign_string = if amount < &0. {"-"} else {""};
-    let result = format!("{}${:.2}", sign_string, amount);
+    let result = format!("{}${:.2}", sign_string, amount.abs());
     return result;
 }
 
