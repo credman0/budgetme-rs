@@ -7,6 +7,7 @@ use tokio::{io::AsyncReadExt};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::fs;
+use std::rc::Rc;
 
 use crate::data::{Data};
 
@@ -18,7 +19,7 @@ pub trait DataProvider {
 
 // serializable configuration that can produce a data provider
 pub trait DataProviderFactory {
-    fn to_provider(&self) -> Box<dyn DataProvider>;
+    fn to_provider(&self) -> Rc<dyn DataProvider>;
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
@@ -38,14 +39,14 @@ impl DataProvider for LocalDataProvider {
     }
 
     async fn put(&self, data:&Data) {
-        fs::create_dir_all(&self.file_path).unwrap_or_default();
+        fs::create_dir_all(&self.directory_path()).unwrap_or_default();
         fs::write(self.full_path(), serde_json::to_string(&data).unwrap()).unwrap();
     }
 }
 
 impl DataProviderFactory for LocalDataProvider {
-    fn to_provider(&self) -> Box<dyn DataProvider> {
-        return Box::new(self.clone());
+    fn to_provider(&self) -> Rc<dyn DataProvider> {
+        return Rc::new(self.clone());
     }
 }
 
@@ -59,8 +60,20 @@ impl LocalDataProvider {
         //let full_data_path = data_path.join("data.json");
         return LocalDataProvider{file_path:data_path}
     }
+
+    /// directory path, which is the file path but expanding tilde to home
+    fn directory_path(&self) -> PathBuf {
+        let directory_path;
+        if self.file_path.starts_with("~") {
+            directory_path = PathBuf::from(dirs::home_dir().unwrap().join(self.file_path.strip_prefix("~").unwrap()));
+        } else {
+            directory_path = self.file_path.clone();
+        }
+        return directory_path;
+    }
+
     fn full_path(&self) -> PathBuf{
-        return self.file_path.join("data.json");
+        return self.directory_path().join("data.json");
     }
 }
 
@@ -127,8 +140,8 @@ pub struct AwsS3DataProviderFactory {
 }
 
 impl DataProviderFactory for AwsS3DataProviderFactory {
-    fn to_provider(&self) -> Box<dyn DataProvider> {
-        return Box::new(AwsS3DataProvider{bucket_name:self.bucket_name.clone(), 
+    fn to_provider(&self) -> Rc<dyn DataProvider> {
+        return Rc::new(AwsS3DataProvider{bucket_name:self.bucket_name.clone(), 
             s3:S3Client::new_with(
                 rusoto_core::request::HttpClient::new().expect("Failed to create HTTP client"),
                 StaticProvider::new(self.access_key.clone(), self.secret_access_key.clone(), None, None),

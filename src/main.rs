@@ -2,7 +2,8 @@ mod data;
 mod datasources;
 
 use std::{
-    fs
+    fs,
+    rc::Rc
 };
 use colored::*;
 use serde::{Deserialize, Serialize};
@@ -98,7 +99,7 @@ fn main() {
     // }    
     // let mut full_data_path = data_path.join("data.json");
     //let mut data_provider:LocalDataProvider = LocalDataProvider::new(full_data_path.clone());
-    let data_provider:Box<dyn DataProvider> = config.get_provider_factory().to_provider();
+    let data_provider = config.get_provider_factory().borrow().to_provider();
     //let data_provider:&DataProvider = &*AwsS3DataProviderFactory {access_key:"AKIA5S65SRCS2XZIQ5FF".to_string(), secret_access_key:"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".to_string(), bucket_name:"budgetdfasdfasdfasdfasdfasdf".to_string(), region:Region::UsEast1}.to_provider();
     let maybe_data = data_provider.get();
     let mut data:Data = runtime::Runtime::new().unwrap().block_on(async {
@@ -126,7 +127,7 @@ fn main() {
     fs::create_dir_all(base_dir).unwrap();
 
     // recompute provider in case of changes in settings
-    let data_provider:Box<dyn DataProvider> = config.get_provider_factory().to_provider();
+    let data_provider = config.get_provider_factory().borrow().to_provider();
     // if budget.config.data_path.is_some() {
     //     fs::create_dir_all((&budget).config.data_path.as_ref().unwrap()).unwrap();
     //     // update the full path because it might have changed during configuration

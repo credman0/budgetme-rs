@@ -6,17 +6,20 @@ use chrono::prelude::*;
 use colored::*;
 use serde::{Deserialize, Serialize};
 use derivative::Derivative;
+use rusoto_core::Region;
 
 use std::rc::Rc;
+use std::cell::RefCell;
+use std::str::FromStr;
 
 use crate::{CfgKey};
 use crate::datasources::{AwsS3DataProviderFactory, LocalDataProvider, DataProviderFactory};
 
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
     data_source:Option<DataSource>,
-    pub local_data_source:Option<LocalDataProvider>,
-    pub aws_data_source:Option<AwsS3DataProviderFactory>,
+    pub local_data_source:Option<Rc<RefCell<LocalDataProvider>>>,
+    pub aws_data_source:Option<Rc<RefCell<AwsS3DataProviderFactory>>>,
     pub use_local:Option<bool>
 }
 
@@ -31,7 +34,7 @@ impl Config {
         return Config {data_source:None, local_data_source:None, aws_data_source:None, use_local:None};
     }
 
-    pub fn get_provider_factory(&mut self) -> Rc<dyn DataProviderFactory> {
+    pub fn get_provider_factory(&mut self) -> Rc<RefCell<dyn DataProviderFactory>> {
         self.convert_from_datasource();
         if self.use_local() {
             return self.get_local()
@@ -45,10 +48,10 @@ impl Config {
         if self.data_source.is_some() {
             match self.data_source.as_ref().unwrap() {
                 DataSource::Local(local) => {
-                    self.local_data_source = Some(local.clone());
+                    self.local_data_source = Some(Rc::new(RefCell::new(local.clone())));
                 },
                 DataSource::Aws(aws) => {
-                    self.aws_data_source = Some(aws.clone());
+                    self.aws_data_source = Some(Rc::new(RefCell::new(aws.clone())));
                 }
             }
             self.data_source = None;
@@ -63,20 +66,20 @@ impl Config {
         }
     }
 
-    pub fn get_local(&mut self) -> Rc<LocalDataProvider> {
+    pub fn get_local(&mut self) -> Rc<RefCell<LocalDataProvider>> {
         self.convert_from_datasource();
         if self.local_data_source.is_none() {
-            self.local_data_source = Some(LocalDataProvider::new());
+            self.local_data_source = Some(Rc::new(RefCell::new(LocalDataProvider::new())));
         }
-        return self.local_data_source.unwrap();
+        return self.local_data_source.clone().unwrap();
     }
 
-    pub fn get_aws(&mut self) -> Rc<AwsS3DataProviderFactory> {
+    pub fn get_aws(&mut self) -> Rc<RefCell<AwsS3DataProviderFactory>> {
         self.convert_from_datasource();
         if self.aws_data_source.is_none() {
-            self.aws_data_source = Some(AwsS3DataProviderFactory::new());
+            self.aws_data_source = Some(Rc::new(RefCell::new(AwsS3DataProviderFactory::new())));
         }
-        return self.aws_data_source.as_ref().unwrap().clone();
+        return self.aws_data_source.clone().unwrap();
     }
 }
 #[derive(Derivative, Serialize, Deserialize, Clone)]
@@ -207,27 +210,47 @@ impl Budget {
                 self.print_rate();
             },
             CfgKey::Path => {
-                self.get
+                let provider = Rc::clone(&self.config.get_local());
+                let mut provider = provider.borrow_mut();
+                provider.file_path = PathBuf::from(value);
+                println!("Data path: {}", provider.file_path.as_os_str().to_string_lossy())
             },
             CfgKey::AccessKey => {
+                let provider = Rc::clone(&self.config.get_aws());
+                let mut provider = provider.borrow_mut();
+                provider.access_key = value.clone();
+                println!("Access key: {}", provider.access_key)
 
             },
             CfgKey::SecretKey => {
+                let provider = Rc::clone(&self.config.get_aws());
+                let mut provider = provider.borrow_mut();
+                provider.bucket_name = value.clone();
+                println!("Secret key: {}", provider.secret_access_key)
 
             },
             CfgKey::BucketName => {
+                let provider = Rc::clone(&self.config.get_aws());
+                let mut provider = provider.borrow_mut();
+                provider.access_key = value.clone();
+                println!("Bucket name: {}", provider.bucket_name)
 
             },
             CfgKey::Region => {
-
+                let provider = Rc::clone(&self.config.get_aws());
+                let mut provider = provider.borrow_mut();
+                provider.region = Region::from_str(value.as_str()).expect("Invalid region");
+                println!("Region: {:?}", provider.region)
             },
             CfgKey::Provider => {
                 match value.trim().to_lowercase().as_str() {
                     "aws" => {
                         self.config.use_local = Some(false);
+                        println!("Provider set to AWS");
                     },
                     "local" => {
                         self.config.use_local = Some(true);
+                        println!("Provider set to local");
                     },
                     _=>{
                         panic!("Invalid provider \"{}\", valid are aws or local", value)
@@ -235,119 +258,48 @@ impl Budget {
                 }
             },
         }
-        if let CfgKey::Provider = key {
-            match value.trim().to_lowercase().as_str() {
-                "aws" => {
-                    self.config.data_source = Some(DataSource::Aws(AwsS3DataProviderFactory::new()));
-                },
-                "local" => {
-                    self.config.data_source = Some(DataSource::Local(LocalDataProvider::new()));
-                },
-                _=>{
-                    panic!("Invalid provider \"{}\", valid are aws or local", value)
-                }
-            }
-        } else if let CfgKey::Rate = key {
-        } else {
-            if let Some(DataSource::Aws(provider)) = &mut self.config.data_source {
-                match key {
-                    CfgKey::BucketName => {
-                        provider.bucket_name = value.to_string();
-                        println!("Bucket name: {}", provider.bucket_name)
-                    },
-                    CfgKey::AccessKey =>{
-                        provider.access_key = value.to_string();
-                        println!("Access key: {}", provider.access_key)
-                    },
-                    CfgKey::SecretKey =>{
-                        provider.secret_access_key = value.to_string();
-                        println!("Secret key: {}", provider.secret_access_key)
-                    },
-                    _=> {
-                        println!("Invalid key for aws data provider: {:?}",key)
-                    }
-                }
-            } else if let Some(DataSource::Local(provider)) = &mut self.config.data_source {
-                match key {
-                    CfgKey::Path =>{
-                        if value.to_lowercase() == "none" {
-                            provider.file_path = LocalDataProvider::new().file_path;
-                        } else {
-                            provider.file_path = PathBuf::from(value);
-                        }
-                        println!("Data path: {}", provider.file_path.as_os_str().to_string_lossy())
-                    },
-                    _=> {
-                        println!("Invalid key for local data provider: {:?}",key)
-                    }
-                }
-            }
-        }
     }
 
-    pub fn get_cfg(&self, key:&CfgKey) {
-        // if let CfgKey::Provider = key {
-        //     match value.trim().to_lowercase().as_str() {
-        //         "aws" => {
-        //             self.config.data_source = Some(DataSource::Aws(AwsS3DataProviderFactory::new()));
-        //         },
-        //         "local" => {
-        //             self.config.data_source = Some(DataSource::Local(LocalDataProvider::new()));
-        //         },
-        //         _=>{
-        //             panic!("Invalid provider \"{}\", valid are aws or local", value)
-        //         }
-        //     }
-        // } else if let CfgKey::Rate = key {
-        //     self.data.rate = Some(value.parse::<f32>().unwrap());
-        //     self.print_rate();
-        // } else {
-        //     if let Some(DataSource::Aws(provider)) = &mut self.config.data_source {
-        //         match key {
-        //             CfgKey::BucketName => {
-        //                 provider.bucket_name = value.to_string();
-        //                 println!("Bucket name: {}", provider.bucket_name)
-        //             },
-        //             CfgKey::AccessKey =>{
-        //                 provider.access_key = value.to_string();
-        //                 println!("Access key: {}", provider.access_key)
-        //             },
-        //             CfgKey::SecretKey =>{
-        //                 provider.secret_access_key = value.to_string();
-        //                 println!("Secret key: {}", provider.secret_access_key)
-        //             },
-        //             _=> {
-        //                 println!("Invalid key for aws data provider: {:?}",key)
-        //             }
-        //         }
-        //     } else if let Some(DataSource::Local(provider)) = &mut self.config.data_source {
-        //         match key {
-        //             CfgKey::Path =>{
-        //                 if value.to_lowercase() == "none" {
-        //                     provider.file_path = LocalDataProvider::new().file_path;
-        //                 } else {
-        //                     provider.file_path = PathBuf::from(value);
-        //                 }
-        //                 println!("Data path: {}", provider.file_path.as_os_str().to_string_lossy())
-        //             },
-        //             _=> {
-        //                 println!("Invalid key for local data provider: {:?}",key)
-        //             }
-        //         }
-        //     }
-        // }
-        if let Some(DataSource::Aws(_provider)) = &self.config.data_source {
-            panic!("Cannot set path on aws provider")
-        } else if let Some(DataSource::Local(provider)) = &self.config.data_source {
-            match key {
-                CfgKey::Rate => self.print_rate(),
-                CfgKey::Path => {
-                    println!("Data path: {}", provider.file_path.as_os_str().to_string_lossy())
-                },
-                _=> {
-                    println!("Invalid key for local data provider: {:?}",key)
+    pub fn get_cfg(&mut self, key:&CfgKey) {
+        match key {
+            CfgKey::Rate => {
+                self.print_rate();
+            },
+            CfgKey::Path => {
+                let provider = Rc::clone(&self.config.get_local());
+                let provider = provider.borrow();
+                println!("Data path: {}", provider.file_path.as_os_str().to_string_lossy())
+            },
+            CfgKey::AccessKey => {
+                let provider = Rc::clone(&self.config.get_aws());
+                let provider = provider.borrow();
+                println!("Access key: {}", provider.access_key)
+
+            },
+            CfgKey::SecretKey => {
+                let provider = Rc::clone(&self.config.get_aws());
+                let provider = provider.borrow();
+                println!("Secret key: {}", provider.secret_access_key)
+
+            },
+            CfgKey::BucketName => {
+                let provider = Rc::clone(&self.config.get_aws());
+                let provider = provider.borrow();
+                println!("Bucket name: {}", provider.bucket_name)
+
+            },
+            CfgKey::Region => {
+                let provider = Rc::clone(&self.config.get_aws());
+                let provider = provider.borrow();
+                println!("Region: {:?}", provider.region)
+            },
+            CfgKey::Provider => {
+                if self.config.use_local() {
+                    println!("Provider set to local");
+                } else{
+                    println!("Provider set to AWS");
                 }
-            }
+            },
         }
     }
 

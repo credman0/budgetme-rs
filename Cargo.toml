@@ -1,6 +1,6 @@
 [package]
 name = "budget"
-version = "2.0.0"
+version = "2.1.0"
 authors = ["Colin Redman <20376935+credman0@users.noreply.github.com>"]
 edition = "2018"
 
@@ -8,7 +8,7 @@ edition = "2018"
 structopt = "0.3"
 dirs = "3.0"
 colored = "2.0.0"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 chrono = "0.4"
 derivative = "2.1.3"
