@@ -3,6 +3,8 @@ A program for budgeting frivilities by tracking expenses and adding a daily allo
 
 ![Screenshot](Screenshot.jpg?raw=true "Screenshot")
 
+Support is available for storing the data locally or using an AWS S3 bucket.
+
 # Usage
 Precompiled releases are available for Linux and Windows. Or, to build it, clone the repository, navigate to the directory, and then install with:
 
