@@ -33,6 +33,7 @@ enum Command {
     Spend {
         amount:f32,
         reason:String,
+        specific:Option<String>,
         #[structopt(short="o", long)]
         loan:bool
     },
@@ -114,7 +115,7 @@ fn main() {
             Command::List => budget.list(),
             Command::Undo => budget.undo(),
             Command::Redo => budget.redo(),
-            Command::Spend{amount, reason, loan} => budget.spend(amount,reason,&loan),
+            Command::Spend{amount, reason, specific, loan} => budget.spend(amount,reason,specific,&loan),
             Command::CfgCommand(command) => match command {
                 CfgCommand::Set{key, value} => budget.set_cfg(&key, &value),
                 CfgCommand::Get{key} => budget.get_cfg(&key)

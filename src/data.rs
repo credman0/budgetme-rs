@@ -124,6 +124,8 @@ impl Data {
 pub struct HistoryItem {
     amount:f32,
     reason:String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    specific:Option<String>,
     time:u64
 }
 
@@ -144,7 +146,13 @@ impl HistoryItem {
         } else {
             format_str = "%b %d %Y %I:%M%P"
         }
-        println!("{}: {} {}", date.format(format_str).to_string().blue().on_black(), format_dollars(&self.amount).bright_red().on_black(), self.reason.yellow().on_black());
+        println!("{}: {} {} {}", date.format(format_str).to_string().blue().on_black(), format_dollars(&self.amount).bright_red().on_black(), self.reason.yellow().on_black(), 
+            if self.specific.is_some() {
+                format!("({})", self.specific.as_ref().unwrap())
+            } else {
+                "".to_string()
+            }.yellow().on_black()
+        );
     }
 }
 
@@ -185,7 +193,7 @@ impl Budget {
         self.print_balance();
     }
 
-    pub fn spend(&mut self, amount:f32, reason:String, loan:&bool) {
+    pub fn spend(&mut self, amount:f32, reason:String, specific:Option<String>, loan:&bool) {
         if amount <= 0. {
             println!("{}", "Amount must be positive!".bright_red().on_black());
         }
@@ -194,7 +202,7 @@ impl Budget {
             println!("{}", "Request is over budget!".bright_red().on_black());
             println!("Balance: {}", format_dollars(&self.data.balance).bright_red().on_black());
         } else {
-            let history_item = HistoryItem{amount:amount, reason:reason, time:Local::now().timestamp_millis() as u64};
+            let history_item = HistoryItem{amount:amount, reason:reason, specific:specific, time:Local::now().timestamp_millis() as u64};
             history_item.print();
             self.data.history.push(history_item);
             self.data.balance = new_balance;
