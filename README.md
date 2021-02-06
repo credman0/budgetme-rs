@@ -4,7 +4,7 @@ A program for budgeting frivilities by tracking expenses and adding a daily allo
 ![Screenshot](Screenshot.jpg?raw=true "Screenshot")
 
 # Usage
-Clone, navigate to the directory, and then install with:
+Precompiled releases are available for Linux and Windows. Or, to build it, clone the repository, navigate to the directory, and then install with:
 
 `cargo install --path .`
 
