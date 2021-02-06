@@ -27,13 +27,21 @@ struct Cli {
 
 #[derive(StructOpt, Debug)]
 enum Command {
+    /// Print the spending history, most recent last
     List,
+    /// Undo the most recent spend action
     Undo,
+    /// Redo the most recent undo
     Redo,
+    /// Spend some money from the active account balance
     Spend {
+        /// Amount to spend, in dollars
         amount:f32,
+        /// The category of spending
         reason:String,
+        /// More specific description of spending
         specific:Option<String>,
+        /// Allow spending beyond the current account balance
         #[structopt(short="o", long)]
         loan:bool
     },
@@ -44,11 +52,13 @@ enum Command {
 
 #[derive(StructOpt, Debug)]
 enum CfgCommand {
+    /// Set a configuration value
     Set {
         #[structopt(possible_values = &CfgKey::variants(), case_insensitive = true)]
         key:CfgKey,
         value:String
     },
+    /// Get a current configuration value
     Get {
         #[structopt(possible_values = &CfgKey::variants(), case_insensitive = true)]
         key:CfgKey
