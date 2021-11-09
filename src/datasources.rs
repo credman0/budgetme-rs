@@ -9,7 +9,17 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use std::rc::Rc;
 
+use crate::DATA_VERSION;
+
 use crate::data::{Data};
+
+fn convert_data (data:&mut Data) {
+    if data.version.is_none() {
+        data.version = Some(DATA_VERSION);
+
+
+    }
+}
 
 #[async_trait]
 pub trait DataProvider {
@@ -97,7 +107,8 @@ impl DataProvider for AwsS3DataProvider {
             let stream = result.unwrap().body.unwrap();
             let mut buffer = String::new();
             stream.into_async_read().read_to_string(&mut buffer).await.unwrap();
-            let data:Data = serde_json::from_str(&buffer).unwrap();
+            let mut data:Data = serde_json::from_str(&buffer).unwrap();
+            convert_data(&mut data);
             return Some(data);
         }
     }

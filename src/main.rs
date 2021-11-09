@@ -16,6 +16,8 @@ use data::{Budget,Config,Data};
 use structopt::StructOpt;
 use structopt::clap::arg_enum;
 
+const DATA_VERSION:u32 = 1;
+
 // Our CLI arguments. (help and version are automatically generated)
 // Documentation on how to use:
 // https://docs.rs/structopt/0.2.10/structopt/index.html#how-to-derivestructopt
@@ -56,7 +58,7 @@ enum CfgCommand {
     Set {
         #[structopt(possible_values = &CfgKey::variants(), case_insensitive = true)]
         key:CfgKey,
-        value:String
+        values:Vec<String>,
     },
     /// Get a current configuration value
     Get {
@@ -74,7 +76,8 @@ arg_enum! {
         SecretKey,
         BucketName,
         Region,
-        Provider
+        Provider,
+        Cringe
     }
 }
 
@@ -127,7 +130,7 @@ fn main() {
             Command::Redo => budget.redo(),
             Command::Spend{amount, reason, specific, loan} => budget.spend(amount,reason,specific,&loan),
             Command::CfgCommand(command) => match command {
-                CfgCommand::Set{key, value} => budget.set_cfg(&key, &value),
+                CfgCommand::Set{key, values} => budget.set_cfg(&key, &values),
                 CfgCommand::Get{key} => budget.get_cfg(&key)
             },
         }

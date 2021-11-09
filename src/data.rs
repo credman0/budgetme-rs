@@ -11,6 +11,7 @@ use rusoto_core::Region;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::str::FromStr;
+use std::collections::HashMap;
 
 use crate::{CfgKey};
 use crate::datasources::{AwsS3DataProviderFactory, LocalDataProvider, DataProviderFactory};
@@ -82,25 +83,29 @@ impl Config {
         return self.aws_data_source.clone().unwrap();
     }
 }
-#[derive(Derivative, Serialize, Deserialize, Clone)]
+#[derive(Derivative, Serialize, Deserialize, Clone, Debug)]
 #[derivative(PartialEq)]
 pub struct Data {
+    pub version:Option<u32>,
     history:Vec<HistoryItem>,
     redo_stack:Vec<HistoryItem>,
     balance:f32,
     #[derivative(PartialEq="ignore")]
     last_updated:u64,
     pub rate:Option<f32>,
+    cringe_factors:HashMap<String, f32>
 }
 
 impl Data {
     pub fn new() -> Data {
         return Data {
+            version:Some(1),
             history:vec![],
             redo_stack:vec![],
             balance:10.,
             rate:Some(5.),
-            last_updated:Local::now().timestamp_millis() as u64
+            last_updated:Local::now().timestamp_millis() as u64,
+            cringe_factors:HashMap::new()
         }
     }
 
@@ -113,6 +118,10 @@ impl Data {
         self.balance = self.balance + ((current-last) as f32)*rate;
         self.last_updated = now.timestamp_millis() as u64;
     }
+
+    pub fn set_cringe(&mut self, keyword:&dyn AsRef<str>, factor:f32) {
+        self.cringe_factors.insert(keyword.as_ref().to_string(), factor);
+    }
 }
 
 // #[derive(Serialize, Deserialize)]
@@ -120,7 +129,7 @@ impl Data {
 //     items
 // }
 
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub struct HistoryItem {
     amount:f32,
     reason:String,
@@ -197,12 +206,18 @@ impl Budget {
         if amount <= 0. {
             println!("{}", "Amount must be positive!".bright_red().on_black());
         }
-        let new_balance = self.data.balance-amount;
+        let amount_scaled;
+        if self.data.cringe_factors.contains_key(&reason.to_ascii_lowercase()) {
+            amount_scaled = self.data.cringe_factors[&reason.to_ascii_lowercase()]*amount;
+        } else {
+            amount_scaled = amount;
+        }
+        let new_balance = self.data.balance-amount_scaled;
         if new_balance < 0. && !loan {
             println!("{}", "Request is over budget!".bright_red().on_black());
             println!("Balance: {}", format_dollars(&self.data.balance).bright_red().on_black());
         } else {
-            let history_item = HistoryItem{amount:amount, reason:reason, specific:specific, time:Local::now().timestamp_millis() as u64};
+            let history_item = HistoryItem{amount:amount_scaled, reason:reason, specific:specific, time:Local::now().timestamp_millis() as u64};
             history_item.print();
             self.data.history.push(history_item);
             self.data.balance = new_balance;
@@ -211,7 +226,8 @@ impl Budget {
         }
     }
     
-    pub fn set_cfg(&mut self, key:&CfgKey, value:&String) {
+    pub fn set_cfg(&mut self, key:&CfgKey, values:&Vec<String>) {
+        let value = values[0].clone();
         match key {
             CfgKey::Rate => {
                 self.data.rate = Some(value.parse::<f32>().unwrap());
@@ -265,6 +281,16 @@ impl Budget {
                     }
                 }
             },
+            CfgKey::Cringe => {
+                if values.len() != 2 {
+                    panic!("Wrong number of arguments to cringe")
+                }
+                
+                let cringe_keyword = values[0].clone();
+                let cringe_factor = f32::from_str(&values[1]);
+
+                self.data.set_cringe(&cringe_keyword, cringe_factor.unwrap());
+            }
         }
     }
 
@@ -308,6 +334,10 @@ impl Budget {
                     println!("Provider set to AWS");
                 }
             },
+            CfgKey::Cringe => {
+                println!("{:?}", &self.data.cringe_factors);
+            }
+
         }
     }
 
@@ -367,6 +397,11 @@ impl Budget {
                 return false;
             }
         }
+        if self.data.history == old_data_updated.history && self.data.balance == old_data_updated.balance {
+            // updated cringe or something else, hope OK
+            return true;
+        }
+        println!("Unknown verifcation failure: {:?} vs {:?}", &old_data_updated, &self.data);
         return false;
     }
 }
