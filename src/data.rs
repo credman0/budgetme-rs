@@ -93,6 +93,7 @@ pub struct Data {
     #[derivative(PartialEq="ignore")]
     last_updated:u64,
     pub rate:Option<f32>,
+    #[serde(default)]
     cringe_factors:HashMap<String, f32>
 }
 

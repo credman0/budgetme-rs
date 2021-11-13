@@ -13,12 +13,12 @@ use crate::DATA_VERSION;
 
 use crate::data::{Data};
 
-fn convert_data (data:&mut Data) {
+fn convert_data <E> (data:Result<Data, E>) -> Data where E:std::error::Error {
+    let mut data = data.unwrap();
     if data.version.is_none() {
         data.version = Some(DATA_VERSION);
-
-
     }
+    return data;
 }
 
 #[async_trait]
@@ -107,8 +107,8 @@ impl DataProvider for AwsS3DataProvider {
             let stream = result.unwrap().body.unwrap();
             let mut buffer = String::new();
             stream.into_async_read().read_to_string(&mut buffer).await.unwrap();
-            let mut data:Data = serde_json::from_str(&buffer).unwrap();
-            convert_data(&mut data);
+            let data:Result<Data, _> = serde_json::from_str(&buffer);
+            let data = convert_data(data);
             return Some(data);
         }
     }
