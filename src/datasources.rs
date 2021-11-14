@@ -16,7 +16,12 @@ use crate::data::{Data};
 fn convert_data <E> (data:Result<Data, E>) -> Data where E:std::error::Error {
     let mut data = data.unwrap();
     if data.version.is_none() {
-        data.version = Some(DATA_VERSION);
+        data.version = Some(*DATA_VERSION);
+    }
+    if data.version.unwrap() > *crate::DATA_VERSION {
+        panic!("Data more recent than program");
+    } else {
+        data.version = Some(*DATA_VERSION);
     }
     return data;
 }

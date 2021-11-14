@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 mod data;
 mod datasources;
 
@@ -15,8 +18,9 @@ use data::{Budget,Config,Data};
 
 use structopt::StructOpt;
 use structopt::clap::arg_enum;
-
-const DATA_VERSION:u32 = 1;
+lazy_static! {
+    static ref DATA_VERSION:f32 = format!("{}.{}", env!("CARGO_PKG_VERSION_MAJOR"), env!("CARGO_PKG_VERSION_MINOR")).parse().unwrap();
+}
 
 // Our CLI arguments. (help and version are automatically generated)
 // Documentation on how to use:
@@ -77,7 +81,8 @@ arg_enum! {
         BucketName,
         Region,
         Provider,
-        Cringe
+        Cringe,
+        Synonym
     }
 }
 

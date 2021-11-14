@@ -11,7 +11,7 @@ use rusoto_core::Region;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::str::FromStr;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{CfgKey};
 use crate::datasources::{AwsS3DataProviderFactory, LocalDataProvider, DataProviderFactory};
@@ -86,7 +86,7 @@ impl Config {
 #[derive(Derivative, Serialize, Deserialize, Clone, Debug)]
 #[derivative(PartialEq)]
 pub struct Data {
-    pub version:Option<u32>,
+    pub version:Option<f32>,
     history:Vec<HistoryItem>,
     redo_stack:Vec<HistoryItem>,
     balance:f32,
@@ -94,19 +94,22 @@ pub struct Data {
     last_updated:u64,
     pub rate:Option<f32>,
     #[serde(default)]
-    cringe_factors:HashMap<String, f32>
+    cringe_factors:HashMap<String, f32>,
+    #[serde(default)]
+    synonyms:HashMap<String, HashSet<String>>
 }
 
 impl Data {
     pub fn new() -> Data {
         return Data {
-            version:Some(1),
+            version:Some(*crate::DATA_VERSION),
             history:vec![],
             redo_stack:vec![],
             balance:10.,
             rate:Some(5.),
             last_updated:Local::now().timestamp_millis() as u64,
-            cringe_factors:HashMap::new()
+            cringe_factors:HashMap::new(),
+            synonyms:HashMap::new()
         }
     }
 
@@ -121,7 +124,59 @@ impl Data {
     }
 
     pub fn set_cringe(&mut self, keyword:&dyn AsRef<str>, factor:f32) {
-        self.cringe_factors.insert(keyword.as_ref().to_string(), factor);
+        let keyword = &keyword.as_ref().to_ascii_lowercase();
+        if self.has_synonyms(keyword) {
+            let synonyms = self.get_synonyms(keyword);
+            for synonym in synonyms {
+                if self.cringe_factors.contains_key(&synonym) {
+                    self.cringe_factors.insert(synonym.to_string(), factor);
+                    return;
+                }
+            }
+        }
+        self.cringe_factors.insert(keyword.to_string(), factor);
+    }
+    
+    pub fn get_cringiness(&self, keyword:&dyn AsRef<str>) -> f32 {
+        let keyword = &keyword.as_ref().to_ascii_lowercase();
+        if self.has_synonyms(keyword) {
+            let synonyms = self.get_synonyms(keyword);
+            for synonym in synonyms {
+                if self.cringe_factors.contains_key(&synonym) {
+                    return *self.cringe_factors.get(&synonym).unwrap();
+                }
+            }
+        }
+        return 1f32;
+
+    }
+
+    pub fn set_synonym(&mut self, first:&dyn AsRef<str>, second:&dyn AsRef<str>) {
+        let first = first.as_ref().to_string().to_ascii_lowercase();
+        let second = second.as_ref().to_string().to_ascii_lowercase();
+        if !self.synonyms.contains_key(&first) {
+            self.synonyms.insert(first.clone(), HashSet::new());
+        }
+        let set = self.synonyms.get_mut(&first).unwrap();
+        set.insert(second.clone());
+
+        if !self.synonyms.contains_key(&second) {
+            self.synonyms.insert(second.clone(), HashSet::new());
+        }
+        let set = self.synonyms.get_mut(&second).unwrap();
+        set.insert(first.clone());
+    }
+
+    pub fn get_synonyms<'a>(&self, key:&dyn AsRef<str>) -> HashSet<String>{
+        let key = key.as_ref().to_string().to_ascii_lowercase();
+        let mut res = self.synonyms.get(&key).unwrap().clone();
+        res.insert(key);
+        return res;
+    }
+
+    pub fn has_synonyms<'a>(&self, key:&dyn AsRef<str>) -> bool{
+        let key = key.as_ref().to_string().to_ascii_lowercase();
+        return self.synonyms.contains_key(&key);
     }
 }
 
@@ -207,12 +262,12 @@ impl Budget {
         if amount <= 0. {
             println!("{}", "Amount must be positive!".bright_red().on_black());
         }
-        let amount_scaled;
-        if self.data.cringe_factors.contains_key(&reason.to_ascii_lowercase()) {
-            amount_scaled = self.data.cringe_factors[&reason.to_ascii_lowercase()]*amount;
-        } else {
-            amount_scaled = amount;
-        }
+        let amount_scaled = amount*self.data.get_cringiness(&reason.to_ascii_lowercase());
+        // if self.data.cringe_factors.contains_key(&reason.to_ascii_lowercase()) {
+        //     amount_scaled = self.data.cringe_factors[&reason.to_ascii_lowercase()]*amount;
+        // } else {
+        //     amount_scaled = amount; 
+        // }
         let new_balance = self.data.balance-amount_scaled;
         if new_balance < 0. && !loan {
             println!("{}", "Request is over budget!".bright_red().on_black());
@@ -291,6 +346,16 @@ impl Budget {
                 let cringe_factor = f32::from_str(&values[1]);
 
                 self.data.set_cringe(&cringe_keyword, cringe_factor.unwrap());
+            },
+            CfgKey::Synonym => {
+
+                if values.len() != 2 {
+                    panic!("Wrong number of arguments to Synonym")
+                }
+                let first = values[0].clone();
+                let second = values[1].clone();
+
+                self.data.set_synonym(&first, &second);
             }
         }
     }
@@ -337,6 +402,9 @@ impl Budget {
             },
             CfgKey::Cringe => {
                 println!("{:?}", &self.data.cringe_factors);
+            },
+            CfgKey::Synonym => {
+                println!("{:?}", &self.data.synonyms);
             }
 
         }
