@@ -19,7 +19,7 @@ use data::{Budget,Config,Data};
 use structopt::StructOpt;
 use structopt::clap::arg_enum;
 lazy_static! {
-    static ref DATA_VERSION:f32 = format!("{}.{}", env!("CARGO_PKG_VERSION_MAJOR"), env!("CARGO_PKG_VERSION_MINOR")).parse().unwrap();
+    static ref DATA_VERSION:f32 = format!("{}", env!("CARGO_PKG_VERSION_MAJOR")).parse().unwrap();
 }
 
 // Our CLI arguments. (help and version are automatically generated)
@@ -51,6 +51,8 @@ enum Command {
         #[structopt(short="o", long)]
         loan:bool
     },
+    /// Reset the balance, but put half the rate towards repaying the debt until it is repaid
+    Garnish,
     #[structopt(flatten)]
     CfgCommand(CfgCommand)
 }
@@ -133,6 +135,7 @@ fn main() {
             Command::List => budget.list(),
             Command::Undo => budget.undo(),
             Command::Redo => budget.redo(),
+            Command::Garnish => budget.garnish(),
             Command::Spend{amount, reason, specific, loan} => budget.spend(amount,reason,specific,&loan),
             Command::CfgCommand(command) => match command {
                 CfgCommand::Set{key, values} => budget.set_cfg(&key, &values),

@@ -90,6 +90,8 @@ pub struct Data {
     history:Vec<HistoryItem>,
     redo_stack:Vec<HistoryItem>,
     balance:f32,
+    #[serde(default)]
+    debt:f32,
     #[derivative(PartialEq="ignore")]
     last_updated:u64,
     pub rate:Option<f32>,
@@ -106,6 +108,7 @@ impl Data {
             history:vec![],
             redo_stack:vec![],
             balance:10.,
+            debt:0.,
             rate:Some(5.),
             last_updated:Local::now().timestamp_millis() as u64,
             cringe_factors:HashMap::new(),
@@ -119,7 +122,20 @@ impl Data {
         let last = Local.timestamp_millis(self.last_updated as i64).num_days_from_ce();
         assert_eq!(current>=last, true);
 
-        self.balance = self.balance + ((current-last) as f32)*rate;
+        let elapsed = current-last;
+
+        // The gains before any garnishes
+        let mut net_gains = rate*elapsed as f32;
+        if self.debt > 0. {
+            if self.debt > net_gains/2. {
+                self.debt-=net_gains/2.;
+                net_gains /= 2.0;
+            } else {
+                net_gains -= self.debt;
+                self.debt = 0.;
+            }
+        }
+        self.balance = self.balance + net_gains;
         self.last_updated = now.timestamp_millis() as u64;
     }
 
@@ -177,6 +193,11 @@ impl Data {
     pub fn has_synonyms<'a>(&self, key:&dyn AsRef<str>) -> bool{
         let key = key.as_ref().to_string().to_ascii_lowercase();
         return self.synonyms.contains_key(&key);
+    }
+
+    /// The balance minus the debts
+    pub fn total_balance(&self) -> f32{
+        return self.balance - self.debt;
     }
 }
 
@@ -255,6 +276,17 @@ impl Budget {
         let amount = last_item.amount;
         self.data.balance -= amount;
         self.data.history.push(last_item);
+        self.print_balance();
+    }
+
+    pub fn garnish(&mut self) {
+        if self.data.balance >= 0. {
+            println!("{}", "Balance is already non-negative".bright_red().on_black());
+            return;
+        }
+        // Turn the balance into a "positive" debt
+        self.data.debt -= self.data.balance;
+        self.data.balance = 0.;
         self.print_balance();
     }
 
@@ -416,7 +448,8 @@ impl Budget {
 
     pub fn print_balance(&self) {
         let balance_formatted = if self.data.balance<0. {format_dollars(&self.data.balance).bright_red().on_black()} else {format_dollars(&self.data.balance).green().on_black()};
-        println!("Balance: {}", balance_formatted);
+        let debt_formatted = if self.data.debt>0. {format_dollars(&self.data.debt).yellow().on_black()} else {format_dollars(&self.data.debt).green().on_black()};
+        println!("Balance:\t{}\nDebt:\t\t{}", balance_formatted, debt_formatted);
     }
 
     pub fn verify_against(&self, old_data:Data) -> bool{
@@ -436,7 +469,7 @@ impl Budget {
                 // everything matches except we have one more entry in the old data, EG we must have undone something
                 let last_item = old_data_updated.history.last().unwrap();
                 old_data_updated.balance += last_item.amount;
-                if self.data.balance == old_data_updated.balance {
+                if self.data.total_balance() == old_data_updated.total_balance() {
                     return true;
                 } else {
                     println!("{}", format!("Data missing entry but old data history does not match (expected {} but found {})", self.data.balance, old_data_updated.balance).red().on_black());
@@ -453,7 +486,7 @@ impl Budget {
                 // everything matches except we have one more entry in the new data, EG we must have added something
                 let last_item = self.data.history.last().unwrap();
                 old_data_updated.balance -= last_item.amount;
-                if self.data.balance == old_data_updated.balance {
+                if self.data.total_balance() == old_data_updated.total_balance() {
                     return true;
                 } else {
                     println!("{}", format!("Data has new entry but diverges from old data (expected {} but found {})", self.data.balance, old_data_updated.balance).red().on_black());
@@ -466,7 +499,7 @@ impl Budget {
                 return false;
             }
         }
-        if self.data.history == old_data_updated.history && self.data.balance == old_data_updated.balance {
+        if self.data.history == old_data_updated.history && self.data.total_balance() == old_data_updated.total_balance() {
             // updated cringe or something else, hope OK
             return true;
         }
